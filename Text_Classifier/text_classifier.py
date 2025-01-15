@@ -6,6 +6,12 @@ from sklearn.model_selection import train_test_split
 from keras.datasets import imdb
 import numpy as np
 
+# Check if GPU is available
+if not torch.cuda.is_available():
+    print("CUDA is not available. Exiting the program.")
+    exit()
+device = torch.device("cuda")
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, embedding_dim, num_heads=8):
         super(MultiHeadAttention, self).__init__()
@@ -23,7 +29,7 @@ class MultiHeadAttention(nn.Module):
     def scaled_dot_product_attention(self, query, key, value):
         matmul_qk = torch.matmul(query, key.transpose(-2, -1))
         depth = key.size(-1)
-        logits = matmul_qk / torch.sqrt(torch.tensor(depth, dtype=torch.float32))
+        logits = matmul_qk / torch.sqrt(torch.tensor(depth, dtype=torch.float32, device=query.device))
         attention_weights = F.softmax(logits, dim=-1)
         output = torch.matmul(attention_weights, value)
         return output, attention_weights
@@ -105,24 +111,24 @@ class TransformerClassifier(nn.Module):
 # Parameters
 vocab_size = 20000
 max_len = 200
-embedding_dim = 64
-num_heads = 4
-dff = 128
+embedding_dim = 32
+num_heads = 2
+dff = 64
 num_classes = 2
 
 # Load IMDB dataset
 (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocab_size)
-X_train = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_train])
-X_test = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_test])
-y_train = torch.tensor(y_train)
-y_test = torch.tensor(y_test)
+X_train = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_train]).to(device)
+X_test = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_test]).to(device)
+y_train = torch.tensor(y_train).to(device)
+y_test = torch.tensor(y_test).to(device)
 
 # DataLoader
 train_dataset = TensorDataset(X_train, y_train)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 
 # Model instance
-model = TransformerClassifier(max_len, vocab_size, embedding_dim, num_heads, dff, num_classes)
+model = TransformerClassifier(max_len, vocab_size, embedding_dim, num_heads, dff, num_classes).to(device)
 
 # Training
 criterion = nn.CrossEntropyLoss()
@@ -132,7 +138,7 @@ epochs = 10
 model.train()
 for epoch in range(epochs):
     for batch in train_loader:
-        x_batch, y_batch = batch
+        x_batch, y_batch = [t.to(device) for t in batch]
         outputs = model(x_batch)
         loss = criterion(outputs, y_batch)
 
@@ -168,7 +174,7 @@ def encode_sentence(sentence, word_index, max_len):
     tokens = [word_index.get(word, 2) for word in sentence.split()]  # 2 is <UNK>
     return tokens[:max_len] + [0] * (max_len - len(tokens))
 
-encoded_inputs = torch.tensor([encode_sentence(sentence, word_index, max_len) for sentence in sentences])
+encoded_inputs = torch.tensor([encode_sentence(sentence, word_index, max_len) for sentence in sentences]).to(device)
 
 # Make predictions
 with torch.no_grad():
