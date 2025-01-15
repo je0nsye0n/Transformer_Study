@@ -15,3 +15,4 @@
 |-------|-------|
 | 01.13 | 주교재로 트랜스포머 정리 | 
 | 01.14 | Transformer paper code review, Encoder code : Py2C |
+| 01.15 | C로 fclayer 동작 |
