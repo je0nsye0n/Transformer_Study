@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
 #include "model.h"
 #define MAX_LEN 100
 #define NUM_CLASSES 2
@@ -10,10 +12,23 @@ fclayer *create_fclayer(int input_dim, int output_dim) {
     layer->input_dim = input_dim;
     layer->output_dim = output_dim;
     layer->w = malloc(output_dim * sizeof(float *));
+    
+    srand((unsigned int)time(NULL)); // 랜덤 초기화
+
+
     for (int i = 0; i < output_dim; i++) {
         layer->w[i] = malloc(input_dim * sizeof(float));
+        for(int j=0; j<input_dim; j++){ // 가중치 랜덤 초기화
+            layer->w[i][j] = ((float)rand()/RAND_MAX) * 0.01;
+            //printf("weight : %.3f\n", layer->w[i][j]);
+        }
     }
+
     layer->b = malloc(output_dim * sizeof(float));
+    for(int i=0; i<output_dim; i++){
+        layer->b[i] = 0.0f; // 편향은 0으로 초기화
+    }
+
     return layer;
 }
 
@@ -30,17 +45,33 @@ float *forward_fc(fclayer *layer, float *input) {
 
 float compute_loss(float *output, int label) {
     float loss = 0.0;
-    for (int i = 0; i < NUM_CLASSES; i++) {
-        float target = (i == label) ? 1.0 : 0.0;
-        loss += (output[i] - target) * (output[i] - target);
+    float sum_exp = 0.0;
+    
+    for(int i=0; i<NUM_CLASSES; i++){
+        sum_exp += exp(output[i]);
     }
+
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        float softmax = exp(output[i]) / sum_exp;
+        float target = (i == label) ? 1.0 : 0.0;
+        loss += -target * log(softmax); // 교차 엔트로피    
+    }
+
     return loss / NUM_CLASSES;
 }
 
 void backward_and_update(fclayer *layer, float *input, int label, float learning_rate) {
+    float sum_exp = 0.0;
+
+    for(int i=0; i<layer->output_dim; i++){
+        sum_exp += exp(layer->b[i]);
+    }
+
     for (int i = 0; i < layer->output_dim; i++) {
+        float softmax = exp(layer->b[i]) / sum_exp;
         float target = (i == label) ? 1.0 : 0.0;
-        float error = layer->b[i] - target;
+        float error = softmax - target; // 소프트맥스를 기반으로 오차 계산
+
         for (int j = 0; j < layer->input_dim; j++) {
             layer->w[i][j] -= learning_rate * error * input[j];
         }
@@ -94,7 +125,7 @@ float evaluate_model(fclayer *model, Dataset test_data) {
 
 void model_fc(Dataset train_data, Dataset test_data) {
     fclayer *model = create_fclayer(MAX_LEN, NUM_CLASSES);
-    train_model(model, train_data, 10, 0.001);
+    train_model(model, train_data, 10, 0.0001);
 
     float accuracy = evaluate_model(model, test_data);
     printf("Test Accuracy: %.4f\n", accuracy);

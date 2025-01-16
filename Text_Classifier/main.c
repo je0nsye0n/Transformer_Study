@@ -57,11 +57,28 @@ void free_dataset(Dataset dataset) {
     free(dataset.labels);
 }
 
+void normalize_dataset(Dataset *dataset, int max_value) {
+    for (int i = 0; i < dataset->size; i++) {
+        for (int j = 0; j < MAX_LEN; j++) {
+            if (dataset->data[i][j] > 0) { // 0이 아닌 값만 정규화
+                dataset->data[i][j] = (float)dataset->data[i][j] / max_value;
+            } else {
+                dataset->data[i][j] = 0.0f; // 0인 경우 유지
+            }
+        }
+    }
+}
+
+
 Dataset train_data, test_data;
 
 void dataload() {
     train_data = load_dataset("data/train_data.csv", MAX_LEN);
     test_data = load_dataset("data/test_data.csv", MAX_LEN);
+
+    normalize_dataset(&train_data, VOCAB_SIZE - 1);
+    normalize_dataset(&test_data, VOCAB_SIZE - 1);
+
 
     printf("Train Dataset Size: %d\n", train_data.size);
     printf("Test Dataset Size: %d\n", test_data.size);
