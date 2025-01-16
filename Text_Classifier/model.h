@@ -7,11 +7,9 @@ typedef struct {
     int input_dim;
     int output_dim;
     float **w, *b;
-} fclayer;
+} transLayer;
 
-fclayer *create_fclayer(int input_dim, int output_dim);
-float *forward_fc(fclayer *layer, float *input);
-
-fclayer *classifier(Dataset train_data, Dataset test_data);
+transLayer *create_fclayer(int input_dim, int output_dim);
+float *classifier(transLayer *model, float *data);
 
 #endif

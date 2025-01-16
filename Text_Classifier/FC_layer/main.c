@@ -97,52 +97,31 @@ void dataload() {
 float compute_loss(float *output, int label) {
     float loss = 0.0;
     float sum_exp = 0.0;
-    float max_output = output[0];
-
-    // Find max value for numerical stability
-    for (int i = 1; i < NUM_CLASSES; i++) {
-        if (output[i] > max_output) {
-            max_output = output[i];
-        }
+    
+    for(int i=0; i<NUM_CLASSES; i++){
+        sum_exp += exp(output[i]);
     }
 
-    // Compute softmax denominator with max subtraction
     for (int i = 0; i < NUM_CLASSES; i++) {
-        sum_exp += exp(output[i] - max_output);
-    }
-
-    // Compute loss
-    for (int i = 0; i < NUM_CLASSES; i++) {
-        float softmax = exp(output[i] - max_output) / sum_exp;
+        float softmax = exp(output[i]) / sum_exp;
         float target = (i == label) ? 1.0 : 0.0;
-        if (softmax > 0) { // Avoid log(0)
-            loss += -target * log(softmax);
-        }
+        loss += -target * log(softmax); // 교차 엔트로피    
     }
 
     return loss / NUM_CLASSES;
 }
-void backward_and_update(transLayer *layer, float *input, int label, float learning_rate) {
+
+void backward_and_update(fclayer *layer, float *input, int label, float learning_rate) {
     float sum_exp = 0.0;
-    float max_b = layer->b[0];
 
-    // Find max value for numerical stability
-    for (int i = 1; i < layer->output_dim; i++) {
-        if (layer->b[i] > max_b) {
-            max_b = layer->b[i];
-        }
+    for(int i=0; i<layer->output_dim; i++){
+        sum_exp += exp(layer->b[i]);
     }
 
-    // Compute softmax denominator with max subtraction
     for (int i = 0; i < layer->output_dim; i++) {
-        sum_exp += exp(layer->b[i] - max_b);
-    }
-
-    // Update weights and biases
-    for (int i = 0; i < layer->output_dim; i++) {
-        float softmax = exp(layer->b[i] - max_b) / sum_exp;
+        float softmax = exp(layer->b[i]) / sum_exp;
         float target = (i == label) ? 1.0 : 0.0;
-        float error = softmax - target;
+        float error = softmax - target; // 소프트맥스를 기반으로 오차 계산
 
         for (int j = 0; j < layer->input_dim; j++) {
             layer->w[i][j] -= learning_rate * error * input[j];
@@ -150,6 +129,7 @@ void backward_and_update(transLayer *layer, float *input, int label, float learn
         layer->b[i] -= learning_rate * error;
     }
 }
+
 int argmax(float *array, int size) {
     int max_idx = 0;
     for (int i = 1; i < size; i++) {
@@ -160,15 +140,15 @@ int argmax(float *array, int size) {
     return max_idx;
 }
 
-void train_model(transLayer *model, Dataset train_data, int epochs, float learning_rate) {
+
+void train_model(fclayer *model, Dataset train_data, int epochs, float learning_rate) {
     for (int epoch = 0; epoch < epochs; epoch++) {
         float total_loss = 0.0;
         for (int i = 0; i < train_data.size; i++) {
             float *input = (float *)train_data.data[i];
             int label = train_data.labels[i];
 
-            float *output = classifier(model, input);
-           //float *output = forward_fc(model, input);
+            float *output = forward_fc(model, input);
             float loss = compute_loss(output, label);
             total_loss += loss;
 
@@ -179,13 +159,13 @@ void train_model(transLayer *model, Dataset train_data, int epochs, float learni
     }
 }
 
-float evaluate_model(transLayer *model, Dataset test_data) {
+float evaluate_model(fclayer *model, Dataset test_data) {
     int correct = 0;
     for (int i = 0; i < test_data.size; i++) {
         float *input = (float *)test_data.data[i];
         int label = test_data.labels[i];
 
-        float *output = classifier(model, input);
+        float *output = forward_fc(model, input);
         int predicted = argmax(output, NUM_CLASSES);
         if (predicted == label) {
             correct++;
@@ -204,26 +184,13 @@ int main() {
 
     // DataLoader
     dataload();
+
+    // model
+    fclayer *model = classifier(train_data, test_data);
     
-    transLayer *model = malloc(sizeof(transLayer));
-    model->input_dim = MAX_LEN;
-    model->output_dim = NUM_CLASSES;
-    model->w = malloc(model->output_dim * sizeof(float *));
-    model->b = malloc(model->output_dim * sizeof(float));
-    for (int i = 0; i < model->output_dim; i++) {
-        model->w[i] = malloc(model->input_dim * sizeof(float));
-        for (int j = 0; j < model->input_dim; j++) {
-            model->w[i][j] = ((float)rand() / RAND_MAX) * 0.1f; // 가중치 초기화
-        }
-        model->b[i] = 0.0f; // 편향 초기화
-    }
-
-
-    // model  
     train_model(model, train_data, 10, 0.0001);
     float accuracy = evaluate_model(model, test_data);
     printf("Test Accuracy: %.4f\n", accuracy);
-
     // clear
     clear();
     return 0;
