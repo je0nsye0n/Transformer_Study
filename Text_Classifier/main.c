@@ -1,9 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <time.h>
 #include "model.h"
+#include "header.h"
 #define MAX_LEN 100 // 각 리뷰의 최대 길이
 #define VOCAB_SIZE 2000 // 허용할 단어의 최대 개수
+#define NUM_CLASSES 2
 
 Dataset load_dataset(const char *file_path, int max_len) {
     Dataset dataset;
@@ -90,14 +94,104 @@ void dataload() {
     printf("\nLabel: %d\n", train_data.labels[0]);
 }
 
+float compute_loss(float *output, int label) {
+    float loss = 0.0;
+    float sum_exp = 0.0;
+    
+    for(int i=0; i<NUM_CLASSES; i++){
+        sum_exp += exp(output[i]);
+    }
+
+    for (int i = 0; i < NUM_CLASSES; i++) {
+        float softmax = exp(output[i]) / sum_exp;
+        float target = (i == label) ? 1.0 : 0.0;
+        loss += -target * log(softmax); // 교차 엔트로피    
+    }
+
+    return loss / NUM_CLASSES;
+}
+
+void backward_and_update(fclayer *layer, float *input, int label, float learning_rate) {
+    float sum_exp = 0.0;
+
+    for(int i=0; i<layer->output_dim; i++){
+        sum_exp += exp(layer->b[i]);
+    }
+
+    for (int i = 0; i < layer->output_dim; i++) {
+        float softmax = exp(layer->b[i]) / sum_exp;
+        float target = (i == label) ? 1.0 : 0.0;
+        float error = softmax - target; // 소프트맥스를 기반으로 오차 계산
+
+        for (int j = 0; j < layer->input_dim; j++) {
+            layer->w[i][j] -= learning_rate * error * input[j];
+        }
+        layer->b[i] -= learning_rate * error;
+    }
+}
+
+int argmax(float *array, int size) {
+    int max_idx = 0;
+    for (int i = 1; i < size; i++) {
+        if (array[i] > array[max_idx]) {
+            max_idx = i;
+        }
+    }
+    return max_idx;
+}
+
+
+void train_model(fclayer *model, Dataset train_data, int epochs, float learning_rate) {
+    for (int epoch = 0; epoch < epochs; epoch++) {
+        float total_loss = 0.0;
+        for (int i = 0; i < train_data.size; i++) {
+            float *input = (float *)train_data.data[i];
+            int label = train_data.labels[i];
+
+            float *output = forward_fc(model, input);
+            float loss = compute_loss(output, label);
+            total_loss += loss;
+
+            backward_and_update(model, input, label, learning_rate);
+            free(output);
+        }
+        printf("Epoch %d/%d, Loss: %.4f\n", epoch + 1, epochs, total_loss / train_data.size);
+    }
+}
+
+float evaluate_model(fclayer *model, Dataset test_data) {
+    int correct = 0;
+    for (int i = 0; i < test_data.size; i++) {
+        float *input = (float *)test_data.data[i];
+        int label = test_data.labels[i];
+
+        float *output = forward_fc(model, input);
+        int predicted = argmax(output, NUM_CLASSES);
+        if (predicted == label) {
+            correct++;
+        }
+        free(output);
+    }
+    return (float)correct / test_data.size;
+}
+
 void clear() {
     free_dataset(train_data);
     free_dataset(test_data);
 }
 
 int main() {
+
+    // DataLoader
     dataload();
-    model_fc(train_data, test_data);
+
+    // model
+    fclayer *model = classifier(train_data, test_data);
+    
+    train_model(model, train_data, 10, 0.0001);
+    float accuracy = evaluate_model(model, test_data);
+    printf("Test Accuracy: %.4f\n", accuracy);
+    // clear
     clear();
     return 0;
 }
