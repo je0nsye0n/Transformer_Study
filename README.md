@@ -15,4 +15,5 @@
 |-------|-------|
 | 01.13 | 주교재로 트랜스포머 정리 | 
 | 01.14 | Transformer paper code review, Encoder code : Py2C |
-| 01.15 | C로 fclayer 동작 |
+| 01.15~16 | C로 fclayer 동작 |
+| 01.17 | transformer python 코드 수정 - 정확도 이슈 & 모듈 따로 구현해봄(pos_enc, attention)|
