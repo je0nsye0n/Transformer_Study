@@ -1,187 +1,154 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
-from sklearn.model_selection import train_test_split
-from keras.datasets import imdb
 import numpy as np
+import pandas as pd
+from Korpora import Korpora
 
-# Check if GPU is available
+corpus = Korpora.load("nsmc")
+df = pd.DataFrame(corpus.test).sample(20000, random_state=42)
+
+train, valid, test = np.split(
+    df.sample(frac=1, random_state=42), [int(0.6 * len(df)), int(0.8 * len(df))]
+)
+
+print(train.head(5).to_markdown())
+print(f"Training Data Size : {len(train)}")
+print(f"Validation Data Size : {len(valid)}")
+print(f"Testing Data Size : {len(test)}")
+
+import torch
+from transformers import BertTokenizer
+from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import RandomSampler, SequentialSampler
+
+
+def make_dataset(data, tokenizer, device):
+    tokenized = tokenizer(
+        text=data.text.tolist(),
+        padding="longest",
+        truncation=True,
+        return_tensors="pt"
+    )
+    input_ids = tokenized["input_ids"].to(device)
+    attention_mask = tokenized["attention_mask"].to(device)
+    labels = torch.tensor(data.label.values, dtype=torch.long).to(device)
+    return TensorDataset(input_ids, attention_mask, labels)
+
+
+def get_datalodader(dataset, sampler, batch_size):
+    data_sampler = sampler(dataset)
+    dataloader = DataLoader(dataset, sampler=data_sampler, batch_size=batch_size)
+    return dataloader
+
+
+epochs = 5
+batch_size = 32
+device = "cuda" if torch.cuda.is_available() else "cpu"
+tokenizer = BertTokenizer.from_pretrained(
+    pretrained_model_name_or_path="bert-base-multilingual-cased",
+    do_lower_case=False
+)
+
+train_dataset = make_dataset(train, tokenizer, device)
+train_dataloader = get_datalodader(train_dataset, RandomSampler, batch_size)
+
+valid_dataset = make_dataset(valid, tokenizer, device)
+valid_dataloader = get_datalodader(valid_dataset, SequentialSampler, batch_size)
+
+test_dataset = make_dataset(test, tokenizer, device)
+test_dataloader = get_datalodader(test_dataset, SequentialSampler, batch_size)
+
+print(train_dataset[0])
+
+import torch
+from torch import optim
+from transformers import BertForSequenceClassification
+
 if not torch.cuda.is_available():
     print("CUDA is not available. Exiting the program.")
     exit()
 device = torch.device("cuda")
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, embedding_dim, num_heads=8):
-        super(MultiHeadAttention, self).__init__()
-        self.embedding_dim = embedding_dim  # d_model
-        self.num_heads = num_heads
-        assert embedding_dim % self.num_heads == 0
+model = BertForSequenceClassification.from_pretrained(
+    pretrained_model_name_or_path="bert-base-multilingual-cased",
+    num_labels=2
+).to(device)
+optimizer = optim.AdamW(model.parameters(), lr=1e-5, eps=1e-8)
 
-        self.projection_dim = embedding_dim // num_heads
+for main_name, main_module in model.named_children():
+    print(main_name)
+    for sub_name, sub_module in main_module.named_children():
+        print("└", sub_name)
+        for ssub_name, ssub_module in sub_module.named_children():
+            print("│  └", ssub_name)
+            for sssub_name, sssub_module in ssub_module.named_children():
+                print("│  │  └", sssub_name)
 
-        self.query_dense = nn.Linear(embedding_dim, embedding_dim)
-        self.key_dense = nn.Linear(embedding_dim, embedding_dim)
-        self.value_dense = nn.Linear(embedding_dim, embedding_dim)
-        self.dense = nn.Linear(embedding_dim, embedding_dim)
+import numpy as np
+from torch import nn
 
-    def scaled_dot_product_attention(self, query, key, value):
-        matmul_qk = torch.matmul(query, key.transpose(-2, -1))
-        depth = key.size(-1)
-        logits = matmul_qk / torch.sqrt(torch.tensor(depth, dtype=torch.float32, device=query.device))
-        attention_weights = F.softmax(logits, dim=-1)
-        output = torch.matmul(attention_weights, value)
-        return output, attention_weights
 
-    def split_heads(self, x, batch_size):
-        x = x.view(batch_size, -1, self.num_heads, self.projection_dim)
-        return x.permute(0, 2, 1, 3)
+def calc_accuracy(preds, labels):
+    pred_flat = np.argmax(preds, axis=1).flatten()
+    labels_flat = labels.flatten()
+    return np.sum(pred_flat == labels_flat) / len(labels_flat)
 
-    def forward(self, inputs):
-        batch_size = inputs.size(0)
+def train(model, optimizer, dataloader):
+    model.train()
+    train_loss = 0.0
 
-        query = self.split_heads(self.query_dense(inputs), batch_size)
-        key = self.split_heads(self.key_dense(inputs), batch_size)
-        value = self.split_heads(self.value_dense(inputs), batch_size)
+    for input_ids, attention_mask, labels in dataloader:
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
 
-        scaled_attention, _ = self.scaled_dot_product_attention(query, key, value)
-        scaled_attention = scaled_attention.permute(0, 2, 1, 3).contiguous()
-        concat_attention = scaled_attention.view(batch_size, -1, self.embedding_dim)
-
-        outputs = self.dense(concat_attention)
-        return outputs
-
-class TransformerBlock(nn.Module):
-    def __init__(self, embedding_dim, num_heads, dff, rate=0.1):
-        super(TransformerBlock, self).__init__()
-        self.att = MultiHeadAttention(embedding_dim, num_heads)
-        self.ffn = nn.Sequential(
-            nn.Linear(embedding_dim, dff),
-            nn.ReLU(),
-            nn.Linear(dff, embedding_dim)
-        )
-        self.layernorm1 = nn.LayerNorm(embedding_dim)
-        self.layernorm2 = nn.LayerNorm(embedding_dim)
-        self.dropout1 = nn.Dropout(rate)
-        self.dropout2 = nn.Dropout(rate)
-
-    def forward(self, inputs):
-        attn_output = self.att(inputs)
-        attn_output = self.dropout1(attn_output)
-        out1 = self.layernorm1(inputs + attn_output)
-
-        ffn_output = self.ffn(out1)
-        ffn_output = self.dropout2(ffn_output)
-        return self.layernorm2(out1 + ffn_output)
-
-class TokenAndPositionEmbedding(nn.Module):
-    def __init__(self, max_len, vocab_size, embedding_dim):
-        super(TokenAndPositionEmbedding, self).__init__()
-        self.token_emb = nn.Embedding(vocab_size, embedding_dim)
-        self.pos_emb = nn.Embedding(max_len, embedding_dim)
-
-    def forward(self, x):
-        positions = torch.arange(0, x.size(1), device=x.device).unsqueeze(0)
-        positions = self.pos_emb(positions)
-        x = self.token_emb(x)
-        return x + positions
-
-class TransformerClassifier(nn.Module):
-    def __init__(self, max_len, vocab_size, embedding_dim, num_heads, dff, num_classes, rate=0.1):
-        super(TransformerClassifier, self).__init__()
-        self.embedding = TokenAndPositionEmbedding(max_len, vocab_size, embedding_dim)
-        self.transformer1 = TransformerBlock(embedding_dim, num_heads, dff, rate)
-        self.transformer2 = TransformerBlock(embedding_dim, num_heads, dff, rate)
-        self.pooling = nn.AdaptiveAvgPool1d(1)
-        self.fc1 = nn.Linear(embedding_dim, 50)
-        self.fc2 = nn.Linear(50, num_classes)
-        self.dropout = nn.Dropout(rate)
-
-    def forward(self, x):
-        x = self.embedding(x)
-        x = self.transformer1(x)
-        x = self.transformer2(x)
-        x = x.permute(0, 2, 1)  # For pooling
-        x = self.pooling(x).squeeze(-1)
-        x = F.relu(self.fc1(x))
-        x = self.dropout(x)
-        return self.fc2(x)
-
-# Parameters
-vocab_size = 20000
-max_len = 200
-embedding_dim = 32
-num_heads = 2
-dff = 64
-num_classes = 2
-
-# Load IMDB dataset
-(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocab_size)
-X_train = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_train]).to(device)
-X_test = torch.tensor([x[:max_len] + [0] * (max_len - len(x)) for x in X_test]).to(device)
-y_train = torch.tensor(y_train).to(device)
-y_test = torch.tensor(y_test).to(device)
-
-# DataLoader
-train_dataset = TensorDataset(X_train, y_train)
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
-
-# Model instance
-model = TransformerClassifier(max_len, vocab_size, embedding_dim, num_heads, dff, num_classes).to(device)
-
-# Training
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-epochs = 10
-model.train()
-for epoch in range(epochs):
-    for batch in train_loader:
-        x_batch, y_batch = [t.to(device) for t in batch]
-        outputs = model(x_batch)
-        loss = criterion(outputs, y_batch)
-
+        loss = outputs.loss
+        train_loss += loss.item()
+        
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-    print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item():.4f}")
+    train_loss = train_loss / len(dataloader)
+    return train_loss
 
-# Evaluation
-model.eval()
-with torch.no_grad():
-    test_outputs = model(X_test)
-    test_predictions = torch.argmax(test_outputs, dim=1)
-    accuracy = (test_predictions == y_test).float().mean().item()
+def evaluation(model, dataloader):
+    with torch.no_grad():
+        model.eval()
+        criterion = nn.CrossEntropyLoss()
+        val_loss, val_accuracy = 0.0, 0.0
+        
+        for input_ids, attention_mask, labels in dataloader:
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            logits = outputs.logits
 
-print(f"Test Accuracy: {accuracy:.4f}")
+            loss = criterion(logits, labels)
+            logits = logits.detach().cpu().numpy()
+            label_ids = labels.to("cpu").numpy()
+            accuracy = calc_accuracy(logits, label_ids)
+            
+            val_loss += loss
+            val_accuracy += accuracy
+    
+    val_loss = val_loss/len(dataloader)
+    val_accuracy = val_accuracy/len(dataloader)
+    return val_loss, val_accuracy
 
-# Example sentences
-word_index = imdb.get_word_index()
-index_to_word = {value + 3: key for key, value in word_index.items()}
-index_to_word[0] = "<PAD>"
-index_to_word[1] = "<START>"
-index_to_word[2] = "<UNK>"
 
-sentences = [
-    "this movie is great",
-    "this movie is terrible",
-    "a very bad experience"
-]
+best_loss = 10000
+epochs = 10
+for epoch in range(epochs):
+    train_loss = train(model, optimizer, train_dataloader)
+    val_loss, val_accuracy = evaluation(model, valid_dataloader)
+    print(f"Epoch {epoch + 1}: Train Loss: {train_loss:.4f} Val Loss: {val_loss:.4f} Val Accuracy {val_accuracy:.4f}")
 
-def encode_sentence(sentence, word_index, max_len):
-    tokens = [word_index.get(word, 2) for word in sentence.split()]  # 2 is <UNK>
-    return tokens[:max_len] + [0] * (max_len - len(tokens))
+    if val_loss < best_loss:
+        best_loss = val_loss
+        torch.save(model.state_dict(), "./models/BertForSequenceClassification.pt")
+        print("Saved the model weights")
 
-encoded_inputs = torch.tensor([encode_sentence(sentence, word_index, max_len) for sentence in sentences]).to(device)
+model = BertForSequenceClassification.from_pretrained(
+    pretrained_model_name_or_path="bert-base-multilingual-cased",
+    num_labels=2
+).to(device)
+model.load_state_dict(torch.load("./models/BertForSequenceClassification.pt"))
 
-# Make predictions
-with torch.no_grad():
-    predictions = model(encoded_inputs)
-    predicted_classes = torch.argmax(predictions, dim=1)
-    class_labels = ["negative", "positive"]
-    decoded_predictions = [class_labels[p.item()] for p in predicted_classes]
-
-for sentence, prediction in zip(sentences, decoded_predictions):
-    print(f"Sentence: '{sentence}' => Prediction: {prediction}")
+test_loss, test_accuracy = evaluation(model, test_dataloader)
+print(f"Test Loss : {test_loss:.4f}")
+print(f"Test Accuracy : {test_accuracy:.4f}")
