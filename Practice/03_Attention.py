@@ -45,8 +45,7 @@ class MultiHeadedAttention(nn.Module):
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
 
-# Example usage
-batch_size = 1
+batch_size = 2
 seq_len = 10
 d_model = 6
 h = 2

@@ -7,14 +7,14 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 typedef struct {
-    int h;         // Number of heads
-    int d_model;   // Model dimension
-    int d_k;       // Dimension per head
-    float ****linears; // Weights for query, key, value, and output
+    int h;         // 어텐션 헤드 수
+    int d_model;   // 모델의 전체 차원
+    int d_k;       // 헤드별 차원(d_model/h)
+    float ****linears; // 쿼리(Query), 키(Key), 값(Value)와 출력 변환에 사용되는 가중치 배열
     float dropout; 
 } MultiHeadedAttention;
 
-
+/*4차원 배열 동적 할당 - 랜덤 초기화 범위 [-0.1,0.1]로 설정*/
 float ****allocate_4d_array(int a, int b, int c, int d) {
     float ****array = (float ****)malloc(a * sizeof(float ***));
     for (int i = 0; i < a; i++) {
@@ -73,7 +73,8 @@ void matmul(float *A, float *B, float *C, int m, int n, int p) {
 }
 
 // Scaled dot-product attention
-void attention(float *query, float *key, float *value, float *output, int seq_len, int d_k) {
+void attention(float *query, float *key, float *value, 
+                float *output, int seq_len, int d_k) {
     float *scores = (float *)malloc(seq_len * seq_len * sizeof(float));
     float scale = 1.0f / sqrt((float)d_k);
 
@@ -82,11 +83,18 @@ void attention(float *query, float *key, float *value, float *output, int seq_le
         scores[i] *= scale;
     }
 
-    // Softmax 
+    // Softmax with numerical stability
     for (int i = 0; i < seq_len; i++) {
+        float max_score = scores[i * seq_len];
+        for (int j = 1; j < seq_len; j++) {
+            if (scores[i * seq_len + j] > max_score) {
+                max_score = scores[i * seq_len + j];
+            }
+        }
+
         float sum = 0.0f;
         for (int j = 0; j < seq_len; j++) {
-            scores[i * seq_len + j] = exp(scores[i * seq_len + j]);
+            scores[i * seq_len + j] = exp(scores[i * seq_len + j] - max_score);
             sum += scores[i * seq_len + j];
         }
         for (int j = 0; j < seq_len; j++) {
@@ -99,22 +107,35 @@ void attention(float *query, float *key, float *value, float *output, int seq_le
 }
 
 // Multi-Head Attention 
-void multi_head_attention_forward(MultiHeadedAttention *attn, float *query, float *key, float *value, float *output, int batch_size, int seq_len) {
+void multi_head_attention_forward(MultiHeadedAttention *attn, 
+                                float *query, float *key, float *value, 
+                                float *output, int batch_size, int seq_len) {
     int d_k = attn->d_k;
     int h = attn->h;
 
-    float *head_output = (float *)malloc(seq_len * d_k * sizeof(float));
-    for (int i = 0; i < h; i++) {
-        attention(query, key, value, head_output, seq_len, d_k);
-    }
+    memset(output, 0, sizeof(float) * batch_size * seq_len * attn->d_model); // Ensure output is cleared
 
-    // Combine heads 
-    memcpy(output, head_output, seq_len * d_k * sizeof(float));
-    free(head_output);
+    for (int i = 0; i < h; i++) {
+        float *query_slice = query + i * seq_len * d_k;
+        float *key_slice = key + i * seq_len * d_k;
+        float *value_slice = value + i * seq_len * d_k;
+        float *head_output = (float *)malloc(seq_len * d_k * sizeof(float));
+
+        attention(query_slice, key_slice, value_slice, head_output, seq_len, d_k);
+
+        // Combine head outputs into the final output
+        for (int j = 0; j < seq_len; j++) {
+            for (int k = 0; k < d_k; k++) {
+                output[j * attn->d_model + i * d_k + k] = head_output[j * d_k + k];
+            }
+        }
+
+        free(head_output);
+    }
 }
 
 int main() {
-    int batch_size = 1;
+    int batch_size = 2;
     int seq_len = 10;
     int d_model = 6;
     int h = 2;
@@ -133,14 +154,28 @@ int main() {
         value[i] = ((float)rand() / RAND_MAX);
     }
 
+    memset(output, 0, sizeof(output)); // Initialize output to 0
+
     multi_head_attention_forward(attn, query, key, value, output, batch_size, seq_len);
 
-    // Print output
+    // Print output to console
     printf("Output:\n");
     for (int i = 0; i < batch_size * seq_len * d_model; i++) {
         printf("%f ", output[i]);
         if ((i + 1) % d_model == 0) printf("\n");
     }
+
+    // Save output to file
+    FILE *output_file = fopen("./data/c_output.txt", "w");
+    if (output_file == NULL) {
+        perror("Failed to open output file");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < batch_size * seq_len * d_model; i++) {
+        fprintf(output_file, "%f\n", output[i]);
+    }
+    fclose(output_file);
 
     free_multi_head_attention(attn);
     return 0;
