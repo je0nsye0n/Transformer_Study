@@ -1,93 +1,147 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h>
 #include <math.h>
+#include <string.h>
 
-// 파라미터
-#define seq_len 4
-#define d_model 6
-#define head 2
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-// Q,K,V
-float query[seq_len][d_model];
-float key[seq_len][d_model];
-float value[seq_len][d_model];
+typedef struct {
+    int h;         // Number of heads
+    int d_model;   // Model dimension
+    int d_k;       // Dimension per head
+    float ****linears; // Weights for query, key, value, and output
+    float dropout; 
+} MultiHeadedAttention;
 
-//Fully Connected Function
-/*
-for (int i = 0; i < output_dim; i++) {
-        layer->w[i] = malloc(input_dim * sizeof(float));
-        for(int j=0; j<input_dim; j++){ // 가중치 랜덤 초기화
-            layer->w[i][j] = ((float)rand()/RAND_MAX) * 0.01;
-            //printf("weight : %.3f\n", layer->w[i][j]);
+
+float ****allocate_4d_array(int a, int b, int c, int d) {
+    float ****array = (float ****)malloc(a * sizeof(float ***));
+    for (int i = 0; i < a; i++) {
+        array[i] = (float ***)malloc(b * sizeof(float **));
+        for (int j = 0; j < b; j++) {
+            array[i][j] = (float **)malloc(c * sizeof(float *));
+            for (int k = 0; k < c; k++) {
+                array[i][j][k] = (float *)malloc(d * sizeof(float));
+                for (int l = 0; l < d; l++) {
+                    array[i][j][k][l] = ((float)rand() / RAND_MAX) * 0.2f - 0.1f; 
+                }
+            }
+        }
+    }
+    return array;
+}
+
+void free_4d_array(float ****array, int a, int b, int c) {
+    for (int i = 0; i < a; i++) {
+        for (int j = 0; j < b; j++) {
+            for (int k = 0; k < c; k++) {
+                free(array[i][j][k]);
+            }
+            free(array[i][j]);
+        }
+        free(array[i]);
+    }
+    free(array);
+}
+
+MultiHeadedAttention *create_multi_head_attention(int h, int d_model, float dropout) {
+    MultiHeadedAttention *attn = (MultiHeadedAttention *)malloc(sizeof(MultiHeadedAttention));
+    attn->h = h;
+    attn->d_model = d_model;
+    attn->d_k = d_model / h;
+    attn->dropout = dropout;
+    attn->linears = allocate_4d_array(4, h, attn->d_k, d_model); 
+    return attn;
+}
+
+void free_multi_head_attention(MultiHeadedAttention *attn) {
+    free_4d_array(attn->linears, 4, attn->h, attn->d_k);
+    free(attn);
+}
+
+// Dot product function 
+void matmul(float *A, float *B, float *C, int m, int n, int p) {
+    for (int i = 0; i < m; i++) {
+        for (int j = 0; j < p; j++) {
+            C[i * p + j] = 0;
+            for (int k = 0; k < n; k++) {
+                C[i * p + j] += A[i * n + k] * B[k * p + j];
+            }
+        }
+    }
+}
+
+// Scaled dot-product attention
+void attention(float *query, float *key, float *value, float *output, int seq_len, int d_k) {
+    float *scores = (float *)malloc(seq_len * seq_len * sizeof(float));
+    float scale = 1.0f / sqrt((float)d_k);
+
+    matmul(query, key, scores, seq_len, d_k, seq_len);
+    for (int i = 0; i < seq_len * seq_len; i++) {
+        scores[i] *= scale;
+    }
+
+    // Softmax 
+    for (int i = 0; i < seq_len; i++) {
+        float sum = 0.0f;
+        for (int j = 0; j < seq_len; j++) {
+            scores[i * seq_len + j] = exp(scores[i * seq_len + j]);
+            sum += scores[i * seq_len + j];
+        }
+        for (int j = 0; j < seq_len; j++) {
+            scores[i * seq_len + j] /= sum;
         }
     }
 
-    layer->b = malloc(output_dim * sizeof(float));
-    for(int i=0; i<output_dim; i++){
-        layer->b[i] = 0.0f; // 편향은 0으로 초기화
+    matmul(scores, value, output, seq_len, seq_len, d_k);
+    free(scores);
+}
+
+// Multi-Head Attention 
+void multi_head_attention_forward(MultiHeadedAttention *attn, float *query, float *key, float *value, float *output, int batch_size, int seq_len) {
+    int d_k = attn->d_k;
+    int h = attn->h;
+
+    float *head_output = (float *)malloc(seq_len * d_k * sizeof(float));
+    for (int i = 0; i < h; i++) {
+        attention(query, key, value, head_output, seq_len, d_k);
     }
 
-    return layer;
-*/
-void FullyConnected(){
- 
+    // Combine heads 
+    memcpy(output, head_output, seq_len * d_k * sizeof(float));
+    free(head_output);
 }
 
+int main() {
+    int batch_size = 1;
+    int seq_len = 10;
+    int d_model = 6;
+    int h = 2;
 
-//Dropout Function
-void Dropout(float p){
-    
-}
+    MultiHeadedAttention *attn = create_multi_head_attention(h, d_model, 0.1);
 
-// Transpose Function
-float **transpose(float **matrix, int rows, int cols) {
-    // 동적 메모리 할당
-    float **trans = (float **)malloc(cols * sizeof(float *));
-    for (int i = 0; i < cols; i++) {
-        trans[i] = (float *)malloc(rows * sizeof(float));
+    // query, key, value
+    float query[batch_size * seq_len * d_model];
+    float key[batch_size * seq_len * d_model];
+    float value[batch_size * seq_len * d_model];
+    float output[batch_size * seq_len * d_model];
+
+    for (int i = 0; i < batch_size * seq_len * d_model; i++) {
+        query[i] = ((float)rand() / RAND_MAX);
+        key[i] = ((float)rand() / RAND_MAX);
+        value[i] = ((float)rand() / RAND_MAX);
     }
 
-    // 전치 행렬 계산
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < cols; j++) {
-            trans[j][i] = matrix[i][j];
-        }
+    multi_head_attention_forward(attn, query, key, value, output, batch_size, seq_len);
+
+    // Print output
+    printf("Output:\n");
+    for (int i = 0; i < batch_size * seq_len * d_model; i++) {
+        printf("%f ", output[i]);
+        if ((i + 1) % d_model == 0) printf("\n");
     }
 
-    return trans;
-}
-
-// Scaled-dot Attention Function
-void attention(){
-
-    // query 전치행렬 만들기
-    float **query_t = (float **)malloc(d_model*sizeof(float *));
-    for(int i=0; i<d_model; i++) query_t[i] = (float *)malloc(seq_len*sizeof(float));
-
-    query_t = transpose(query,d_model,seq_len);
-
-    // attention score 저장
-    float **attn_score = (float **)malloc(d_model*sizeof(float *));
-    for(int i=0; i<d_model; i++) query_t[i] = (float *)malloc(seq_len*sizeof(float));    
-
-}
-
-void MultiHeadAttn(){
-    int d_k = (int)(d_model/head);
-}
-
-int main(void){
-    
-    // random 생성
-    for(int j=0; j<seq_len; j++){
-        for(int k=0; k<d_model; k++){
-            query[j][k] = ((float)rand() / RAND_MAX) * 0.1f;
-            key[j][k] = ((float)rand() / RAND_MAX) * 0.1f;
-            value[j][k] = ((float)rand() / RAND_MAX) * 0.1f;
-        }
-    }
-    
-
+    free_multi_head_attention(attn);
+    return 0;
 }
