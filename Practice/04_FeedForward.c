@@ -22,19 +22,55 @@ void relu(float *x, int size) {
         x[i] = fmaxf(0, x[i]);
     }
 }
+// void linear_forward1(Linear1 *linear, float input[BATCH_SIZE][SEQ_LEN][D_MODEL], float output[BATCH_SIZE][SEQ_LEN][HIDDEN]) {
+//     for (int b = 0; b < BATCH_SIZE; b++) { // 배치별 반복
+//         for (int s = 0; s < SEQ_LEN; s++) { // 시퀀스별 반복
+//             for (int h = 0; h < HIDDEN; h++) { // 출력 차원별 계산
+//                 // biases[h]로 초기화
+//                 float output_v = linear->biases[h];
+
+//                 // 입력과 가중치의 곱
+//                 for (int i = 0; i < D_MODEL; i++) {
+//                     output_v += input[b][s][i] * linear->weights[i][h];
+//                 }
+
+//                 // 출력 저장
+//                 output[b][s][h] = output_v;
+
+//                 // 디버깅 출력
+//                 printf("%.4f ", output_v);
+//             }
+//             printf("\n");
+//         }
+//     }
+// }
 
 void linear_forward1(Linear1 *linear, float input[BATCH_SIZE][SEQ_LEN][D_MODEL], float output[BATCH_SIZE][SEQ_LEN][HIDDEN]) {
-    for (int b = 0; b < BATCH_SIZE; b++) {
-        for (int s = 0; s < SEQ_LEN; s++) {
-            for (int h = 0; h < HIDDEN; h++) {
-                output[b][s][h] = linear->biases[h];
-                for (int d = 0; d < D_MODEL; d++) {
-                    output[b][s][h] += input[b][s][d] * linear->weights[h][d];
+
+    float O, I;
+
+    for (int b = 0; b < BATCH_SIZE; b++) { // 배치별 (2)
+        printf("[");
+        for (int s = 0; s < SEQ_LEN; s++) { // 시퀀스별 (4)
+            printf("[");
+            for (int h = 0; h < HIDDEN; h++) { // 출력 차원 (32)
+
+                O = linear->biases[h];
+
+                for(int i=0; i<D_MODEL; i++){
+                    O += input[b][s][i] * linear->weights[h][i];
                 }
+
+                output[b][s][h] = O;
+                printf("%.4f ",O);
+
             }
+            printf("],\n");
         }
+        printf("]\n");
     }
 }
+
 
 void linear_forward2(Linear2 *linear, float input[BATCH_SIZE][SEQ_LEN][HIDDEN], float output[BATCH_SIZE][SEQ_LEN][D_MODEL]) {
     for (int b = 0; b < BATCH_SIZE; b++) {
@@ -58,6 +94,8 @@ void load_weights(const char *filename, float *data, int rows, int cols) {
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             fscanf(file, "%f", &data[j * rows + i]); // Adjust for transpose
+           // printf("Loaded weight: %.10f\n", data[j * rows + i]);
+
         }
     }
     fclose(file);
@@ -71,20 +109,21 @@ void load_biases(const char *filename, float *data, int size) {
     }
     for (int i = 0; i < size; i++) {
         fscanf(file, "%f", &data[i]);
+        //printf("Loaded bias: %.10f\n", data[i]);
     }
     fclose(file);
 }
 
 void print_tensor(const char *label, float *tensor, int dim1, int dim2, int dim3) {
-    printf("%s:\n", label);
+    //printf("%s:\n", label);
     for (int i = 0; i < dim1; i++) {
         for (int j = 0; j < dim2; j++) {
             for (int k = 0; k < dim3; k++) {
-                printf("%.4f ", tensor[(i * dim2 * dim3) + (j * dim3) + k]);
+                //printf("%.4f ", tensor[(i * dim2 * dim3) + (j * dim3) + k]);
             }
-            printf("\n");
+            //printf("\n");
         }
-        printf("\n");
+        //printf("\n");
     }
 }
 
@@ -117,6 +156,7 @@ int main() {
         perror("Failed to open input file");
         exit(1);
     }
+
     for (int i = 0; i < BATCH_SIZE * SEQ_LEN * D_MODEL; i++) {
         fscanf(input_file, "%f", &((float *)input)[i]);
     }
@@ -127,23 +167,20 @@ int main() {
     float output[BATCH_SIZE][SEQ_LEN][D_MODEL] = {0};
 
     // Linear1 -> ReLU
-    linear_forward1(&linear1, input, hidden_output);    
-   // print_weights("Linear1", linear1.weights);
-   // print_tensor("linear1", &hidden_output[0][0][0], BATCH_SIZE, SEQ_LEN, HIDDEN);
-
+    linear_forward1(&linear1, input, hidden_output);
+    
     for (int b = 0; b < BATCH_SIZE; b++) {
         for (int s = 0; s < SEQ_LEN; s++) {
             relu(hidden_output[b][s], HIDDEN);
         }
     }
-
     // Linear2
     linear_forward2(&linear2, hidden_output, output);
 
     // Print results
    // print_tensor("Input Tensor", &input[0][0][0], BATCH_SIZE, SEQ_LEN, D_MODEL);
    // print_tensor("Hidden Output After Linear1 and ReLU", &hidden_output[0][0][0], BATCH_SIZE, SEQ_LEN, HIDDEN);
-   print_tensor("Final Output Tensor", &output[0][0][0], BATCH_SIZE, SEQ_LEN, D_MODEL);
+   //print_tensor("Final Output Tensor", &output[0][0][0], BATCH_SIZE, SEQ_LEN, D_MODEL);
 
     return 0;
 }
