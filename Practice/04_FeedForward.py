@@ -14,16 +14,8 @@ class PositionwiseFeedForward(nn.Module):
     def forward(self, x):
         x = self.linear1(x)
         x = self.relu(x)
-        print("Input")
-        print(x)
-        print("weight")
-        print(model.linear2.weight)
-        print("bias")
-        print(model.linear2.bias)
         #x = self.dropout(x)
         x = self.linear2(x)
-        print("output")
-        print(x)
         return x
 
 # 모델 초기화
@@ -43,9 +35,6 @@ np.savetxt("./data2/linear2_biases.txt", model.linear2.bias.detach().numpy().ast
 input_tensor = torch.randn(2, 4, d_model)  # (BATCH_SIZE, SEQ_LEN, D_MODEL)
 np.savetxt("./data2/input_data.txt", input_tensor.numpy().astype(np.float32).reshape(-1), fmt="%.4f")
 
-
-# print("Input Tensor:")
-# print(input_tensor)
 output = model(input_tensor)
-# print("Output Tensor:")
-# print(output)
+print("Output Tensor:")
+print(output)
