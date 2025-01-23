@@ -13,10 +13,17 @@ class PositionwiseFeedForward(nn.Module):
 
     def forward(self, x):
         x = self.linear1(x)
-        print(x)
         x = self.relu(x)
-        x = self.dropout(x)
+        print("Input")
+        print(x)
+        print("weight")
+        print(model.linear2.weight)
+        print("bias")
+        print(model.linear2.bias)
+        #x = self.dropout(x)
         x = self.linear2(x)
+        print("output")
+        print(x)
         return x
 
 # 모델 초기화
@@ -26,18 +33,19 @@ hidden = 32
 drop_prob = 0.0
 model = PositionwiseFeedForward(d_model, hidden, drop_prob)
 
-# Save model weights and biases
-np.savetxt("./data2/linear1_weights.txt", model.linear1.weight.detach().numpy().T)
-np.savetxt("./data2/linear1_biases.txt", model.linear1.bias.detach().numpy())
-np.savetxt("./data2/linear2_weights.txt", model.linear2.weight.detach().numpy())
-np.savetxt("./data2/linear2_biases.txt", model.linear2.bias.detach().numpy())
+# Save model weights and biases in float32
+np.savetxt("./data2/linear1_weights.txt", model.linear1.weight.detach().numpy().astype(np.float32), fmt="%.4f")
+np.savetxt("./data2/linear1_biases.txt", model.linear1.bias.detach().numpy().astype(np.float32), fmt="%.4f")
+np.savetxt("./data2/linear2_weights.txt", model.linear2.weight.detach().numpy().astype(np.float32), fmt="%.4f")
+np.savetxt("./data2/linear2_biases.txt", model.linear2.bias.detach().numpy().astype(np.float32), fmt="%.4f")
 
 # Generate deterministic input
 input_tensor = torch.randn(2, 4, d_model)  # (BATCH_SIZE, SEQ_LEN, D_MODEL)
-np.savetxt("./data2/input_data.txt", input_tensor.numpy().reshape(-1))
+np.savetxt("./data2/input_data.txt", input_tensor.numpy().astype(np.float32).reshape(-1), fmt="%.4f")
 
-print("Input Tensor:")
-print(input_tensor)
+
+# print("Input Tensor:")
+# print(input_tensor)
 output = model(input_tensor)
-print("Output Tensor:")
-print(output)
+# print("Output Tensor:")
+# print(output)
