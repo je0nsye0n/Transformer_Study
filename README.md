@@ -1,7 +1,7 @@
 # Transformer_Study
 
 - 기간 : 25.01.13 ~   
-- Ref : [Attention is All You Need(paper)](https://arxiv.org/abs/1706.03762), [파이토치 트랜스포머를 활용한 자연어 처리와 컴퓨터비전 심층학습(교재)](https://wikibook.co.kr/pytorchtrf/), [harvardnlp](https://nlp.seas.harvard.edu/2018/04/03/attention.html)
+- Ref : [Paper](https://arxiv.org/abs/1706.03762), [교재](https://wikibook.co.kr/pytorchtrf/), [harvardnlp](https://nlp.seas.harvard.edu/2018/04/03/attention.html)
 
 ---
 ### 공부 내용 기록
