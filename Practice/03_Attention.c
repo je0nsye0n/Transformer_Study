@@ -3,10 +3,22 @@
 #include <math.h>
 #include <string.h>
 
-#define batch_size 1
+#define batch_size 2
 #define seq_len 10
 #define d_model 6
-#define header 1
+#define header 2
+
+typedef struct{
+    float weights[d_model][d_model];
+    float biases[d_model];
+} Linear;
+
+typedef struct{
+    float Q[batch_size][header][seq_len][d_model/header];
+    float K[batch_size][header][seq_len][d_model/header];
+    float V[batch_size][header][seq_len][d_model/header];
+} Results;
+
 
 void data_allocate(float ****data) {
     *data = (float ***)malloc(batch_size * sizeof(float **));
@@ -32,7 +44,7 @@ void data_allocate(float ****data) {
     }
 }
 
-void data_load(const char *filename, float ***data) {
+void QKV_load(const char *filename, float ***data) {
     FILE *file = fopen(filename, "r");
     if (!file) {
         perror("Failed to open file");
@@ -50,6 +62,25 @@ void data_load(const char *filename, float ***data) {
     fclose(file);
 }
 
+void WeightBias_load(const char *filename1, const char *filename2, Linear *linear){
+    FILE *file1 = fopen(filename1, "r");
+    FILE *file2 = fopen(filename2, "r");
+    if(!file1|!file2){
+        perror("Failed to open file");
+        exit(1);
+    }
+
+    for(int i=0; i<d_model; i++){
+        for(int j=0; j<d_model; j++){
+            fscanf(file1,"%f",&linear->weights[i][j]);
+        }
+        fscanf(file2,"%f",&linear->biases[i]);
+    }
+
+    fclose(file1);
+    fclose(file2);
+}
+
 /* 디버깅-검증용 */
 void print_tensor(float ***data) {
     for (int i = 0; i < batch_size; i++) {
@@ -57,6 +88,35 @@ void print_tensor(float ***data) {
         for (int j = 0; j < seq_len; j++) {
             for (int k = 0; k < d_model; k++) {
                 printf("%f ", data[i][j][k]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+void PrintResults(Results *results) {
+    printf("Printing Results.Q:\n");
+    for (int i = 0; i < batch_size; i++) {
+        for (int j = 0; j < header; j++) {
+            for (int k = 0; k < seq_len; k++) {
+                for (int l = 0; l < d_model / header; l++) {
+                    printf("%f ",results->Q[i][j][k][l]);
+                }
+                printf("\n");
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+
+    printf("\nPrinting Results.K:\n");
+    for (int i = 0; i < batch_size; i++) {
+        for (int j = 0; j < header; j++) {
+            for (int k = 0; k < seq_len; k++) {
+                for (int l = 0; l < d_model / header; l++) {
+                    printf("%f ",results->K[i][j][k][l]);
+                }
+                printf("\n");
             }
             printf("\n");
         }
@@ -84,7 +144,23 @@ void Softmax(float score[10][10]){
     }
 }
 
-void Attention(float ***data, float ***key, float ***value, float ***output) {
+void LinearMapping(Linear *linear, float ***input, float output[batch_size][seq_len][d_model]){
+    float O;
+
+    for(int i=0; i<batch_size; i++){
+        for(int j=0; j<seq_len; j++){
+            for(int k=0; k<d_model; k++){
+                O = linear->biases[k];
+                for(int l=0; l<d_model; l++){
+                    O += input[i][j][l] * linear->weights[k][l];
+                }
+                output[i][j][k] = O;
+            }
+        }
+    }
+}
+
+void Attention(float ***query, float ***key, float ***value, float ***output) {
     float score, scale = 1.0f / sqrt((float)d_model);
     float tmp[batch_size][10][10], tmp2[batch_size][10][10];
     for (int i = 0; i < batch_size; i++) {
@@ -92,7 +168,7 @@ void Attention(float ***data, float ***key, float ***value, float ***output) {
             for (int k = 0; k < seq_len; k++) {
                 score = 0.0f;
                 for (int l = 0; l < d_model; l++) {
-                    score += data[i][j][l] * key[i][k][l];
+                    score += query[i][j][l] * key[i][k][l];
                 }
                 tmp[i][j][k] = score * scale;  // 결과를 output에 저장
             }
@@ -100,34 +176,75 @@ void Attention(float ***data, float ***key, float ***value, float ***output) {
 
         Softmax(tmp[i]);
     }
+}
 
-    for(int i=0; i<batch_size; i++){
-        for(int j=0; j<10; j++){
-            for(int k=0; k<10; k++){
-                printf("%f ",tmp[i][j][k]);
+void MultiHeadAttention(float ***query, float ***key, float ***value, float ***output,
+                        Linear *linear_q, Linear *linear_k, Linear *linear_v){
+    
+    Results results, output;
+    int d_k = d_model/header;
+    float tmp [batch_size][seq_len][d_model];
+    float head1[batch_size][seq_len][header][d_k], head2[batch_size][header][seq_len][d_k];
+
+    /*차례로 선형 변환 후 헤드 분리*/
+    
+    for(int a=0; a<3; a++){
+        // linear
+        if(a==0) LinearMapping(linear_q,query,tmp);
+        if(a==1) LinearMapping(linear_k,key,tmp);
+        if(a==2) LinearMapping(linear_v,value,tmp);
+
+        // split
+        for(int i=0; i<batch_size; i++){
+            for(int j=0; j<seq_len; j++){
+              for(int k=0; k<header; k++){
+                for(int l = 0; l<d_k; l++){
+                    head1[i][j][k][l] = tmp[i][j][k*d_k+l];
+                    }
+                }
             }
-            printf("\n");
         }
+        for (int i = 0; i < batch_size; i++) {
+            for (int j = 0; j < seq_len; j++) {
+                for (int k = 0; k < header; k++) {
+                    for (int l = 0; l < d_k; l++) {
+                        // seq_len과 header를 전치
+                        head2[i][k][j][l] = head1[i][j][k][l];
+                    }
+                }
+            }
+        }
+        if(a==0) memcpy(results.Q, head2, sizeof(results.Q));
+        if(a==1) memcpy(results.K, head2, sizeof(results.K));
+        if(a==2) memcpy(results.V, head2, sizeof(results.V));
     }
+
+    /*attention*/
+    //Attention()
+
+    /*concat 후 반환*/
 }
 
 int main() {
-    // Q, K, V load
+    
+    /*Q, K, V load*/
     float ***query, ***key, ***value, ***output;
     data_allocate(&query);
     data_allocate(&key);
     data_allocate(&value);
     data_allocate(&output);
 
-    data_load("./data/query.txt", query);
-    data_load("./data/key.txt", key);
-    data_load("./data/value.txt", value);
+    QKV_load("./data/query.txt", query);
+    QKV_load("./data/key.txt", key);
+    QKV_load("./data/value.txt", value);
 
-    //print_tensor(query);
-    //print_tensor(key);
-    // print_tensor(value);
+    /*Q,K,V's weight and bias load*/
+    Linear linear_q, linear_k, linear_v;
+    WeightBias_load("./data/linear1_weights.txt","./data/linear1_biases.txt",&linear_q);
+    WeightBias_load("./data/linear2_weights.txt","./data/linear2_biases.txt",&linear_k);
+    WeightBias_load("./data/linear3_weights.txt","./data/linear4_biases.txt",&linear_v);
 
-    Attention(query, key, value, output);
+    MultiHeadAttention(query,key,value,output,&linear_q,&linear_k,&linear_v);
 
     return 0;
 }
