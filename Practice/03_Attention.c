@@ -100,7 +100,6 @@ void Attention(float ***data, float ***key, float ***value, float ***output) {
 
         Softmax(tmp[i]);
     }
-    printf("%f\n",sqrt((float)d_model));
 
     for(int i=0; i<batch_size; i++){
         for(int j=0; j<10; j++){
@@ -124,8 +123,8 @@ int main() {
     data_load("./data/key.txt", key);
     data_load("./data/value.txt", value);
 
-    // print_tensor(query);
-    // print_tensor(key);
+    //print_tensor(query);
+    //print_tensor(key);
     // print_tensor(value);
 
     Attention(query, key, value, output);
