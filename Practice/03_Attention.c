@@ -7,6 +7,7 @@
 #define seq_len 10
 #define d_model 6
 #define header 2
+#define d_k d_model/header
 
 typedef struct{
     float weights[d_model][d_model];
@@ -14,10 +15,23 @@ typedef struct{
 } Linear;
 
 typedef struct{
-    float Q[batch_size][header][seq_len][d_model/header];
-    float K[batch_size][header][seq_len][d_model/header];
-    float V[batch_size][header][seq_len][d_model/header];
+    float Q[batch_size][header][seq_len][d_k];
+    float K[batch_size][header][seq_len][d_k];
+    float V[batch_size][header][seq_len][d_k];
 } Results;
+
+void print_tensor(float ***data) {
+    for (int i = 0; i < batch_size; i++) {
+        printf("Batch %d:\n", i);
+        for (int j = 0; j < seq_len; j++) {
+            for (int k = 0; k < d_model; k++) {
+                printf("%f ", data[i][j][k]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
 
 
 void data_allocate(float ****data) {
@@ -81,46 +95,19 @@ void WeightBias_load(const char *filename1, const char *filename2, Linear *linea
     fclose(file2);
 }
 
-/* 디버깅-검증용 */
-void print_tensor(float ***data) {
-    for (int i = 0; i < batch_size; i++) {
-        printf("Batch %d:\n", i);
-        for (int j = 0; j < seq_len; j++) {
-            for (int k = 0; k < d_model; k++) {
-                printf("%f ", data[i][j][k]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-}
-void PrintResults(Results *results) {
-    printf("Printing Results.Q:\n");
-    for (int i = 0; i < batch_size; i++) {
-        for (int j = 0; j < header; j++) {
-            for (int k = 0; k < seq_len; k++) {
-                for (int l = 0; l < d_model / header; l++) {
-                    printf("%f ",results->Q[i][j][k][l]);
-                }
-                printf("\n");
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
+void LinearMapping(Linear *linear, float ***input, float output[batch_size][seq_len][d_model]){
+    float O;
 
-    printf("\nPrinting Results.K:\n");
-    for (int i = 0; i < batch_size; i++) {
-        for (int j = 0; j < header; j++) {
-            for (int k = 0; k < seq_len; k++) {
-                for (int l = 0; l < d_model / header; l++) {
-                    printf("%f ",results->K[i][j][k][l]);
+    for(int i=0; i<batch_size; i++){
+        for(int j=0; j<seq_len; j++){
+            for(int k=0; k<d_model; k++){
+                O = linear->biases[k];
+                for(int l=0; l<d_model; l++){
+                    O += input[i][j][l] * linear->weights[k][l];
                 }
-                printf("\n");
+                output[i][j][k] = O;
             }
-            printf("\n");
         }
-        printf("\n");
     }
 }
 
@@ -144,51 +131,52 @@ void Softmax(float score[10][10]){
     }
 }
 
-void LinearMapping(Linear *linear, float ***input, float output[batch_size][seq_len][d_model]){
-    float O;
 
-    for(int i=0; i<batch_size; i++){
-        for(int j=0; j<seq_len; j++){
-            for(int k=0; k<d_model; k++){
-                O = linear->biases[k];
-                for(int l=0; l<d_model; l++){
-                    O += input[i][j][l] * linear->weights[k][l];
-                }
-                output[i][j][k] = O;
-            }
-        }
-    }
-}
+void Attention_h(float query[header][seq_len][d_k], float key[header][seq_len][d_k], float value[header][seq_len][d_k], 
+                float output[header][seq_len][d_k]) {
+    
+    float score, scale = 1.0f / sqrt((float)d_k);
+    float tmp[header][seq_len][seq_len];
 
-void Attention(float ***query, float ***key, float ***value, float ***output) {
-    float score, scale = 1.0f / sqrt((float)d_model);
-    float tmp[batch_size][10][10], tmp2[batch_size][10][10];
-    for (int i = 0; i < batch_size; i++) {
+    // attention score 구하기
+    for (int i = 0; i < header; i++) {
         for (int j = 0; j < seq_len; j++) {
             for (int k = 0; k < seq_len; k++) {
                 score = 0.0f;
-                for (int l = 0; l < d_model; l++) {
+                for (int l = 0; l < d_k; l++) {
                     score += query[i][j][l] * key[i][k][l];
                 }
                 tmp[i][j][k] = score * scale;  // 결과를 output에 저장
             }
         }
-
         Softmax(tmp[i]);
+    }
+
+    // attention value 구하기
+    for(int i=0; i<header; i++){
+        for(int j=0; j<seq_len; j++){
+            for(int k=0; k<d_k; k++){
+                score = 0.0f;
+                for(int l=0; l<seq_len; l++){
+                    score += tmp[i][j][l] * value[i][k][l];
+                }
+                output[i][j][k] = score;
+            }
+        }
     }
 }
 
 void MultiHeadAttention(float ***query, float ***key, float ***value, float ***output,
                         Linear *linear_q, Linear *linear_k, Linear *linear_v){
     
-    Results results, output;
-    int d_k = d_model/header;
-    float tmp [batch_size][seq_len][d_model];
-    float head1[batch_size][seq_len][header][d_k], head2[batch_size][header][seq_len][d_k];
+    Results results;
+    float output_tmp[batch_size][header][seq_len][d_k];
 
     /*차례로 선형 변환 후 헤드 분리*/
     
     for(int a=0; a<3; a++){
+        float tmp [batch_size][seq_len][d_model];
+        float head1[batch_size][seq_len][header][d_k], head2[batch_size][header][seq_len][d_k];
         // linear
         if(a==0) LinearMapping(linear_q,query,tmp);
         if(a==1) LinearMapping(linear_k,key,tmp);
@@ -220,9 +208,22 @@ void MultiHeadAttention(float ***query, float ***key, float ***value, float ***o
     }
 
     /*attention*/
-    //Attention()
+    for(int i=0; i<batch_size; i++){
+        Attention_h(results.Q[i],results.K[i],results.V[i],output_tmp[i]);
+    }
 
-    /*concat 후 반환*/
+    /*concat*/
+    for (int i = 0; i < batch_size; i++) {
+        for (int j = 0; j < seq_len; j++) {
+            for (int k = 0; k < d_model; k++) {
+                int header_idx = k / d_k;  // header index
+                int d_k_idx = k % d_k;    // d_k index
+                output[i][j][k] = output_tmp[i][header_idx][j][d_k_idx];
+            }
+        }
+    }
+
+    print_tensor(output);
 }
 
 int main() {
