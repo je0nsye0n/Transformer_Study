@@ -14,4 +14,4 @@
 | 01.15~16 | C로 fclayer 동작 |
 | 01.17 | transformer python 코드 수정 - 정확도 이슈 & 모듈 따로 구현해봄(pos_enc, attention)|
 | 01.20 | 모듈 1차 구현 |
-| 01.21~ | 검증 및 디버깅 + Transformer Encoder 모델 python으로 정리 |
+| 01.21~31 | 검증 및 디버깅 + Transformer Encoder 모델 python으로 정리 |
