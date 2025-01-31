@@ -20,18 +20,36 @@ typedef struct{
     float V[batch_size][header][seq_len][d_k];
 } Results;
 
-void print_tensor(float ***data) {
-    for (int i = 0; i < batch_size; i++) {
+void print_tensor_3d(float data[batch_size][seq_len][d_model], int a, int b, int c) {
+    for (int i = 0; i < a; i++) {
         printf("Batch %d:\n", i);
-        for (int j = 0; j < seq_len; j++) {
-            for (int k = 0; k < d_model; k++) {
-                printf("%f ", data[i][j][k]);
+        for (int j = 0; j < b; j++) {
+            for (int k = 0; k < c; k++) {
+                printf("%.4f ", data[i][j][k]);
             }
             printf("\n");
         }
         printf("\n");
     }
 }
+
+void print_tensor_4d(float ****data, int a, int b, int c, int d) {
+    for (int i = 0; i < a; i++) {
+        printf("Batch %d:\n", i);
+        for (int j = 0; j < b; j++) {
+            printf("Channel %d:\n", j);
+            for (int k = 0; k < c; k++) {
+                for (int l = 0; l < d; l++) {
+                    printf("%f ", data[i][j][k][l]);
+                }
+                printf("\n");
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+
 
 
 void data_allocate(float ****data) {
@@ -158,7 +176,7 @@ void Attention_h(float query[header][seq_len][d_k], float key[header][seq_len][d
             for(int k=0; k<d_k; k++){
                 score = 0.0f;
                 for(int l=0; l<seq_len; l++){
-                    score += tmp[i][j][l] * value[i][k][l];
+                    score += tmp[i][j][l] * value[i][l][k];
                 }
                 output[i][j][k] = score;
             }
@@ -166,11 +184,14 @@ void Attention_h(float query[header][seq_len][d_k], float key[header][seq_len][d
     }
 }
 
-void MultiHeadAttention(float ***query, float ***key, float ***value, float ***output,
-                        Linear *linear_q, Linear *linear_k, Linear *linear_v){
+void MultiHeadAttention(float ***query, float ***key, float ***value, 
+                        float output[batch_size][seq_len][d_model],
+                        Linear *linear_q, Linear *linear_k, Linear *linear_v, Linear *linear_last){
     
     Results results;
     float output_tmp[batch_size][header][seq_len][d_k];
+    float ***output_tmp2;
+    data_allocate(&output_tmp2);
 
     /*차례로 선형 변환 후 헤드 분리*/
     
@@ -215,37 +236,41 @@ void MultiHeadAttention(float ***query, float ***key, float ***value, float ***o
     /*concat*/
     for (int i = 0; i < batch_size; i++) {
         for (int j = 0; j < seq_len; j++) {
-            for (int k = 0; k < d_model; k++) {
-                int header_idx = k / d_k;  // header index
-                int d_k_idx = k % d_k;    // d_k index
-                output[i][j][k] = output_tmp[i][header_idx][j][d_k_idx];
+            for (int h = 0; h < header; h++) { // header 별 d_k 연결
+                for (int l = 0; l < d_k; l++) {
+                    output_tmp2[i][j][h * d_k + l] = output_tmp[i][h][j][l]; 
+                }
             }
         }
     }
 
-    print_tensor(output);
+    LinearMapping(linear_last,output_tmp2,output);
 }
 
 int main() {
     
     /*Q, K, V load*/
-    float ***query, ***key, ***value, ***output;
+    float ***query, ***key, ***value; 
+    float output[batch_size][seq_len][d_model];
     data_allocate(&query);
     data_allocate(&key);
     data_allocate(&value);
-    data_allocate(&output);
 
     QKV_load("./data/query.txt", query);
     QKV_load("./data/key.txt", key);
     QKV_load("./data/value.txt", value);
 
     /*Q,K,V's weight and bias load*/
-    Linear linear_q, linear_k, linear_v;
+    Linear linear_q, linear_k, linear_v, linear_last;
     WeightBias_load("./data/linear1_weights.txt","./data/linear1_biases.txt",&linear_q);
     WeightBias_load("./data/linear2_weights.txt","./data/linear2_biases.txt",&linear_k);
-    WeightBias_load("./data/linear3_weights.txt","./data/linear4_biases.txt",&linear_v);
+    WeightBias_load("./data/linear3_weights.txt","./data/linear3_biases.txt",&linear_v);
+    WeightBias_load("./data/linear4_weights.txt","./data/linear4_biases.txt",&linear_last);
 
-    MultiHeadAttention(query,key,value,output,&linear_q,&linear_k,&linear_v);
+    MultiHeadAttention(query,key,value,output,&linear_q,&linear_k,&linear_v,&linear_last);
+
+    printf("output\n");
+    print_tensor_3d(output,batch_size,seq_len,d_model);
 
     return 0;
 }

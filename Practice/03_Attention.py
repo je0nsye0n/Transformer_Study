@@ -58,7 +58,6 @@ class MultiHeadedAttention(nn.Module):
     def forward(self, query, key, value):
         nbatches = query.size(0)
         # Linear projections
-        print("nbatches: ",nbatches)
         load_linear_weights_biases(self.linears) 
         results = []
         for l, x in zip(self.linears, (query, key, value)):
@@ -73,7 +72,6 @@ class MultiHeadedAttention(nn.Module):
 
         # Concatenate heads and apply final linear layer
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
-        print(x)
         return self.linears[-1](x)
 
 
@@ -97,3 +95,6 @@ multi_head_attn = MultiHeadedAttention(h=h, d_model=d_model, dropout=0.1)
 
 # Multi-head attention computation
 output = multi_head_attn(query, key, value)
+
+print("<output>")
+print(output)
