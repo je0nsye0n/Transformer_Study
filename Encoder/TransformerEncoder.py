@@ -25,7 +25,6 @@ def save_layer_norm_params(layer_norm, name, folder="./data"):
     np.savetxt(gamma_file, layer_norm.gamma.detach().cpu().numpy().astype(np.float32), fmt="%.4f")
     np.savetxt(beta_file, layer_norm.beta.detach().cpu().numpy().astype(np.float32), fmt="%.4f")
 
-
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len, device):
         super(PositionalEncoding, self).__init__()
@@ -150,10 +149,15 @@ class TransformerEmbedding(nn.Module):
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = PositionalEncoding(d_model, max_len, device)
         self.dropout = nn.Dropout(p=drop_prob)
+        self.save_embedding_weights("./Data/embedding_weights.txt")
+        
+    def save_embedding_weights(self, filepath):
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        np.savetxt(filepath, self.tok_emb.weight.detach().cpu().numpy(), fmt="%.6f")
 
     def forward(self, x):
         x = self.tok_emb(x) + self.pos_emb(x)
-        return self.dropout(x)
+        return x
 
 class Encoder(nn.Module):
     def __init__(self, enc_voc_size, max_len, d_model, ffn_hidden, n_head, n_layers, drop_prob, device):
@@ -193,7 +197,6 @@ if __name__ == "__main__":
 
     # Forward pass
     output = encoder(src, src_mask)
-    print(output)
-
+    
     np.savetxt("./Data/input.txt",src.detach().numpy().astype(np.float32),fmt="%.4f")
     np.savetxt("./Data/output.txt",output.detach().numpy().astype(np.float32),fmt="%.4f")
