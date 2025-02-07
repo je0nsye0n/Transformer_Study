@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include "TransformerEncBlk.h"
+#include "TransformerData.h"
 
 /* Hyperparameters 설정 */
 #define enc_voc_size 100
@@ -9,51 +11,13 @@
 #define d_model 16
 #define ffn_hidden 128
 #define n_head 4
-#define n_layers 4
+#define n_layers 1
 
 /* input data 설정 */
 #define batch_size 2
 #define seq_len 5
 
-float **input, **tok_emb, **pos_emb, ***emb_output;
-
-/* 2D 데이터 동적 할당 */
-void data_allocate_2D(float ***data, int row, int col) {
-    *data = (float **)malloc(row * sizeof(float *));
-    for (int i = 0; i < row; i++) {
-        (*data)[i] = (float *)malloc(col * sizeof(float));
-    }
-}
-
-/* 3D 데이터 동적 할당 */
-void data_allocate_3D(float ****data, int dim1, int dim2, int dim3) {
-    *data = (float ***)malloc(dim1 * sizeof(float **));
-    for (int i = 0; i < dim1; i++) {
-        (*data)[i] = (float **)malloc(dim2 * sizeof(float *));
-        for (int j = 0; j < dim2; j++) {
-            (*data)[i][j] = (float *)malloc(dim3 * sizeof(float));
-        }
-    }
-}
-
-/* 2D 데이터 해제 */
-void data_free_2D(float **data, int row) {
-    for (int i = 0; i < row; i++) {
-        free(data[i]);
-    }
-    free(data);
-}
-
-/* 3D 데이터 해제 */
-void data_free_3D(float ***data, int dim1, int dim2) {
-    for (int i = 0; i < dim1; i++) {
-        for (int j = 0; j < dim2; j++) {
-            free(data[i][j]);
-        }
-        free(data[i]);
-    }
-    free(data);
-}
+float **input, **tok_emb, **pos_emb, ***emb_output, ***output;
 
 /* 2D 데이터 로드 함수 */
 void data_load_2D(const char *filename, float **data, int row, int col) {
@@ -101,15 +65,19 @@ void TransformerEmbedding() {
 /* Transformer Encoder 실행 */
 void Transformer_Encoder() {
     TransformerEmbedding();
+    for(int i=0; i<n_layers; i++){
+        TransformerBlock(emb_output, output, batch_size, seq_len, d_model, ffn_hidden, n_head);
+    }
 }
 
 /* 메인 실행 */
 int main() {
     /* 필요한 변수들 동적 할당 및 데이터 로드 */
-    data_allocate_2D(&input, batch_size, seq_len);
-    data_allocate_2D(&tok_emb, enc_voc_size, d_model);
-    data_allocate_2D(&pos_emb, max_len, d_model);  // Positional Encoding 추가
-    data_allocate_3D(&emb_output, batch_size, seq_len, d_model);
+    data_allocate_2d(&input, batch_size, seq_len);
+    data_allocate_2d(&tok_emb, enc_voc_size, d_model);
+    data_allocate_2d(&pos_emb, max_len, d_model);  // Positional Encoding 추가
+    data_allocate_3d(&emb_output, batch_size, seq_len, d_model);
+    data_allocate_3d(&output, batch_size, seq_len, d_model);
 
     data_load_2D("./Data/input.txt", input, batch_size, seq_len);
     data_load_2D("./Data/embedding_weights.txt", tok_emb, enc_voc_size, d_model);
@@ -118,10 +86,10 @@ int main() {
     Transformer_Encoder();
 
     // 메모리 해제
-    data_free_2D(input, batch_size);
-    data_free_2D(tok_emb, enc_voc_size);
-    data_free_2D(pos_emb, max_len);  // Positional Encoding 해제
-    data_free_3D(emb_output, batch_size, seq_len);
+    data_free_2d(input, batch_size);
+    data_free_2d(tok_emb, enc_voc_size);
+    data_free_2d(pos_emb, max_len);  // Positional Encoding 해제
+    data_free_3d(emb_output, batch_size, seq_len);
 
     return 0;
 }

@@ -43,8 +43,7 @@ void Softmax(float **score){
     }
 }
 
-void Attention_h(float ***query, float ***key, float ***value, 
-                float output[header][seq_len][d_k]) {
+void Attention_h(float ***query, float ***key, float ***value, float ***output) {
     
     float score, scale = 1.0f / sqrt((float)d_k);
     float ***tmp;
@@ -79,15 +78,15 @@ void Attention_h(float ***query, float ***key, float ***value,
 }
 
 void MultiHeadAttention(float ***input, float ***output,
-                        Linear *linear_q, Linear *linear_k, Linear *linear_v, Linear *linear_last){
+                        Linear *linear_q, Linear *linear_k, Linear *linear_v, Linear *linear_concat){
     Results results;
     allocate_results(&results, batch_size, header, seq_len, d_k);
     
-    float output_tmp[batch_size][header][seq_len][d_k];
-    float ***tmp, ***output_tmp2;
+    float ****output_tmp, ***output_tmp2, ***tmp;
     float ****head1, ****head2;
     data_allocate_4d(&head1,batch_size,seq_len,header,d_k);
     data_allocate_4d(&head2,batch_size,header,seq_len,d_k);
+    data_allocate_4d(&output_tmp,batch_size,header,seq_len,d_k);
     data_allocate_3d(&tmp, batch_size, seq_len, d_model);
     data_allocate_3d(&output_tmp2, batch_size, seq_len, d_model);
 
@@ -115,9 +114,16 @@ void MultiHeadAttention(float ***input, float ***output,
                 }
             }
         }
-        if(a==0) memcpy(results.Q[0][0][0], head2, batch_size * header * seq_len * d_k * sizeof(float));
-        if(a==1) memcpy(results.K[0][0][0], head2, batch_size * header * seq_len * d_k * sizeof(float));
-        if(a==2) memcpy(results.V[0][0][0], head2, batch_size * header * seq_len * d_k * sizeof(float));
+       
+        for (int i = 0; i < batch_size; i++) {
+            for (int j = 0; j < header; j++) {
+                for (int k = 0; k < seq_len; k++) {
+                    if(a==0) memcpy(results.Q[i][j][k], head2[i][j][k], d_k * sizeof(float));
+                    if(a==1) memcpy(results.K[i][j][k], head2[i][j][k], d_k * sizeof(float));
+                    if(a==2) memcpy(results.V[i][j][k], head2[i][j][k], d_k * sizeof(float));
+                }
+            }
+        }
     }      
     
     /*attention*/
@@ -135,23 +141,25 @@ void MultiHeadAttention(float ***input, float ***output,
             }
         }
     }                   
-    data_print_3D(output_tmp2,batch_size,seq_len,d_model);
-    LinearMapping(linear_last,output_tmp2,output);
+    //data_print_3D(output_tmp2,batch_size,seq_len,d_model);
+    LinearMapping(linear_concat,output_tmp2,output);
 
 }
 
 void TransformerBlock(float ***input, float ***output, int batch, int seq_length, int dim_model, int ffn_hidden, int n_head){
     batch_size = batch, seq_len = seq_length, d_model = dim_model, header = n_head, d_k = d_model/n_head;
     
-    Linear linear_q, linear_k, linear_v, linear_last;
+    Linear linear_q, linear_k, linear_v, linear_concat;
     data_allocate_2d(&linear_q.weight,d_model,d_model); data_allocate_1d(&linear_q.bias, d_model); 
     data_allocate_2d(&linear_k.weight,d_model,d_model); data_allocate_1d(&linear_k.bias, d_model); 
     data_allocate_2d(&linear_v.weight,d_model,d_model); data_allocate_1d(&linear_v.bias, d_model); 
+    data_allocate_2d(&linear_concat.weight,d_model,d_model); data_allocate_1d(&linear_concat.bias, d_model); 
 
     WeightBias_load("./Data/query_linear_weights.txt", "./Data/query_linear_biases.txt", &linear_q, d_model, d_model);
     WeightBias_load("./Data/key_linear_weights.txt", "./Data/key_linear_biases.txt", &linear_k, d_model, d_model);
     WeightBias_load("./Data/value_linear_weights.txt", "./Data/value_linear_biases.txt", &linear_v, d_model, d_model);
-        
-    MultiHeadAttention(input, output,&linear_q, &linear_k, &linear_v,&linear_last);
+    WeightBias_load("./Data/concat_linear_weights.txt", "./Data/concat_linear_biases.txt", &linear_concat, d_model, d_model);
+     
+    MultiHeadAttention(input, output,&linear_q, &linear_k, &linear_v,&linear_concat);
     data_print_3D(output, batch, seq_len, d_model);
 }
