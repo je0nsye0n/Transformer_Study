@@ -25,6 +25,24 @@ def save_layer_norm_params(layer_norm, name, folder="./data"):
     np.savetxt(gamma_file, layer_norm.gamma.detach().cpu().numpy().astype(np.float32), fmt="%.4f")
     np.savetxt(beta_file, layer_norm.beta.detach().cpu().numpy().astype(np.float32), fmt="%.4f")
 
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len, device):
+        super(PositionalEncoding, self).__init__()
+        self.encoding = torch.zeros(max_len, d_model, device=device)
+        self.encoding.requires_grad = False
+
+        pos = torch.arange(0, max_len, device=device).float().unsqueeze(dim=1)
+        _2i = torch.arange(0, d_model, step=2, device=device).float()
+
+        self.encoding[:, ::2] = torch.sin(pos / (10000 ** (_2i / d_model)))
+        self.encoding[:, 1::2] = torch.cos(pos / (10000 ** (_2i / d_model)))
+
+    def forward(self, x):
+        _, seq_len, _ = x.size()
+        return x + self.encoding[:seq_len, :]
+
 class ScaleDotProductAttention(nn.Module):
     def __init__(self):
         super(ScaleDotProductAttention, self).__init__()
@@ -91,14 +109,16 @@ class EncoderLayer(nn.Module):
         return x
 
 class Encoder(nn.Module):
-    def __init__(self, d_model, ffn_hidden, n_head, n_layers):
+    def __init__(self, d_model, ffn_hidden, n_head, n_layers, max_len, device):
         super().__init__()
+        self.positional_encoding = PositionalEncoding(d_model, max_len, device)
         self.layers = nn.ModuleList([
             EncoderLayer(d_model, ffn_hidden, n_head)
             for _ in range(n_layers)
         ])
 
     def forward(self, x, mask=None):
+        x = self.positional_encoding(x)
         for layer in self.layers:
             x = layer(x, mask)
         return x
@@ -119,6 +139,6 @@ if __name__ == "__main__":
     src = torch.randint(0, enc_voc_size, (batch_size, seq_len, d_model)).float().to(device)
     src_mask = torch.ones((batch_size, 1, seq_len, seq_len)).to(device)  # Masking for attention
     
-    encoder = Encoder(d_model, ffn_hidden, n_head, n_layers).to(device)
+    encoder = Encoder(d_model, ffn_hidden, n_head, n_layers, max_len, device).to(device)
     output = encoder(src, src_mask)
     print(output)
