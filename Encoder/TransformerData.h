@@ -19,6 +19,7 @@ typedef struct {
     float ****V;
 } Results;
 
+
 /* 외부에서 사용할 전역 변수 */
 extern float ***query, ***key, ***value;
 
